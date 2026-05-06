@@ -1,0 +1,154 @@
+requirements.txt
+flet
+.github/workflows/build.yml
+import flet as ft
+import sqlite3
+import os
+
+# Base de datos en almacenamiento del teléfono
+DB_PATH = os.path.join(os.path.expanduser("~"), "panaderia.db")
+
+def inicializar_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute('''
+        CREATE TABLE IF NOT EXISTS productos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nombre TEXT UNIQUE NOT NULL,
+            stock INTEGER DEFAULT 0
+        )
+    ''')
+    conn.commit()
+    return conn
+
+def main(page: ft.Page):
+    page.title = "Miel & Canela"
+    page.bgcolor = "#FFF8E1"
+    page.padding = 10
+    
+    conn = inicializar_db()
+    lista = ft.ListView(expand=True, spacing=8)
+
+    def refrescar():
+        lista.controls.clear()
+        cursor = conn.cursor()
+        cursor.execute("SELECT nombre, stock FROM productos ORDER BY nombre")
+        
+        for nombre, stock in cursor.fetchall():
+            lista.controls.append(
+                ft.Card(
+                    content=ft.Container(
+                        padding=10,
+                        content=ft.Row([
+                            ft.Icon(ft.icons.BAKERY_DINING, color="brown"),
+                            ft.Column([
+                                ft.Text(nombre, weight="bold", color="brown"),
+                                ft.Text(f"Stock: {stock}", size=12),
+                            ], spacing=2, expand=True),
+                            ft.IconButton(
+                                ft.icons.REMOVE_CIRCLE,
+                                icon_color="red",
+                                data=nombre,
+                                on_click=lambda e: ajustar(e.control.data, -1)
+                            ),
+                            ft.Text(str(stock), weight="bold"),
+                            ft.IconButton(
+                                ft.icons.ADD_CIRCLE,
+                                icon_color="green",
+                                data=nombre,
+                                on_click=lambda e: ajustar(e.control.data, 1)
+                            ),
+                            ft.IconButton(
+                                ft.icons.DELETE,
+                                icon_color="grey",
+                                data=nombre,
+                                on_click=lambda e: eliminar(e.control.data)
+                            ),
+                        ]),
+                    )
+                )
+            )
+        page.update()
+
+    def ajustar(nombre, delta):
+        cursor = conn.cursor()
+        cursor.execute("SELECT stock FROM productos WHERE nombre=?", (nombre,))
+        stock_actual = cursor.fetchone()[0]
+        if stock_actual + delta >= 0:
+            cursor.execute("UPDATE productos SET stock=stock+? WHERE nombre=?", (delta, nombre))
+            conn.commit()
+            refrescar()
+
+    def eliminar(nombre):
+        conn.execute("DELETE FROM productos WHERE nombre=?", (nombre,))
+        conn.commit()
+        refrescar()
+
+    def agregar(e):
+        nombre = txt_nombre.value.strip()
+        if not nombre:
+            return
+        try:
+            stock = int(txt_stock.value) if txt_stock.value else 0
+            conn.execute("INSERT INTO productos (nombre, stock) VALUES (?, ?)", 
+                        (nombre.upper(), stock))
+            conn.commit()
+            txt_nombre.value = ""
+            txt_stock.value = "0"
+            refrescar()
+        except sqlite3.IntegrityError:
+            page.snack_bar = ft.SnackBar(ft.Text("¡Ya existe!"), bgcolor="red")
+            page.snack_bar.open = True
+            page.update()
+
+    txt_nombre = ft.TextField(label="Nombre del pan", expand=True)
+    txt_stock = ft.TextField(label="Cant.", width=60, value="0", 
+                             keyboard_type=ft.KeyboardType.NUMBER)
+    btn_agregar = ft.IconButton(ft.icons.ADD_CIRCLE, icon_color="brown", 
+                                icon_size=40, on_click=agregar)
+
+    page.add(
+        ft.Text("🍞 Miel & Canela", size=24, weight="bold", 
+                color="brown", text_align="center"),
+        ft.Row([txt_nombre, txt_stock, btn_agregar]),
+        ft.Divider(height=10, color="transparent"),
+        lista
+    )
+    refrescar()
+
+ft.app(target=main, view=ft.AppView.WEB_BROWSER)
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      
+      - name: Install Flet
+        run: pip install flet
+      
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+      
+      - name: Build APK
+        run: flet build apk src/main.py
+      
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: MielCanela-APK
+          path: build/apk/*.apk
