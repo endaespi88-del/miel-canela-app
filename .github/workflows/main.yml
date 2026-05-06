@@ -7,7 +7,6 @@ import os
 
 # Base de datos en almacenamiento del teléfono
 DB_PATH = os.path.join(os.path.expanduser("~"), "panaderia.db")
-
 def inicializar_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute('''
